@@ -1,0 +1,66 @@
+{
+  "status": "frozen_before_pilot",
+  "network": {
+    "nodes": {
+      "n0": 750,
+      "n1": 750,
+      "n2": 750,
+      "n3": 750,
+      "n4": 380,
+      "n5": 380,
+      "n6": 48
+    },
+    "edges": [
+      "n0-n3",
+      "n1-n3",
+      "n2-n3",
+      "n3-n4",
+      "n4-n5",
+      "n4-n6"
+    ],
+    "ratings_kw": {
+      "pcc": 801.3326558749102,
+      "pv": 344.5357166398482,
+      "bess": 312.4396007564502,
+      "main": 801.3326558749102,
+      "hvac_line": 546.363174460166,
+      "fixed_converter": 89.83851332771498
+    },
+    "hvac_line_resistance_ohm": 0.001,
+    "converter_curve": {
+      "normalized_loss": "0.0033333333333333335 + 0.01*x + 0.016666666666666666*x^2",
+      "fit_points": {
+        "0.10": 0.955,
+        "0.50": 0.975,
+        "1.00": 0.97
+      },
+      "source": "https://www.synqor.com/document-download?document=BQ4H480FTx64+Datasheet.pdf",
+      "boundary": "generic public-curve fit used for all converters; not a claim that all devices are this model"
+    }
+  },
+  "bess": {
+    "energy_kwh": 624.8792015129004,
+    "power_kw": 312.4396007564502,
+    "soc_min_fraction": 0.1,
+    "soc_max_fraction": 0.9,
+    "soc_initial_fraction": 0.5,
+    "soc_terminal_fraction": 0.5
+  },
+  "hvac": {
+    "model": "first-order temperature-deviation RC envelope calibrated to centered public Scout scenarios",
+    "baseline_setpoint_c": 24.0,
+    "comfort_min_c": 22.0,
+    "comfort_max_c": 26.0,
+    "tau_hours": 8.0,
+    "state_a": 0.8824969025845955,
+    "state_b_c_per_kwh": 0.018435611519536942,
+    "fixed_base_load_kw": 59.89234221847665,
+    "service_constraint": "daily zero-sum adjustment and terminal temperature deviation zero"
+  },
+  "pilot": {
+    "start": "2023-07-10 00:00:00",
+    "hours": 168,
+    "information": "oracle inputs for physics/evaluator verification only"
+  },
+  "cost_cap_fraction_over_b1": 0.05
+}

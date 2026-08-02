@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "hours": 8760,
+  "time_step_hours": 1,
+  "planning_horizon_hours": 24,
+  "forecast_rule": "previous calendar day at the same hour",
+  "annual_cost_allowances": [0.01, 0.02, 0.03, 0.04, 0.05],
+  "attribution_cost_allowances": [0.01, 0.04, 0.08],
+  "signal_methods": ["DYNAMIC", "MEAN", "SHIFT_7D", "PERMUTED_DAYS"],
+  "signal_shift_hours": 168,
+  "forecast_error_levels": [0.0, 0.05, 0.10, 0.125, 0.15, 0.175, 0.20],
+  "random_seeds": [20260802, 20260803, 20260804],
+  "bootstrap_block_days": 7,
+  "bootstrap_samples": 10000,
+  "closure_tolerance_fraction": 0.005,
+  "comfort_violation_tolerance_hours": 0,
+  "required_complete_annual_hours": 8760,
+  "required_complete_boundary_hours": 672,
+  "dataset_archive_sha256": "d471d50c91e94ca4b52f626e9677445062910bf6a208acbfaed00c01122b3e0e"
+}
+
