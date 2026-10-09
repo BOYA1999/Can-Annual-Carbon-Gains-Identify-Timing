@@ -75,10 +75,10 @@ def main():
     shapley_root = root / "artifacts" / "experiment" / "shapley_relative_2026-08-02"
     shapley = json.loads((shapley_root / "shapley_summary.json").read_text(encoding="utf-8"))
     if not shapley["passed"]:
-        raise RuntimeError("verified Phase 2C source did not pass")
+        raise RuntimeError("verified coalition source did not pass")
     source_records = json.loads((shapley_root / "solver_records.json").read_text(encoding="utf-8"))
     if len(source_records) != 365:
-        raise RuntimeError("Phase 2C reference denominator is not 365 days")
+        raise RuntimeError("reference denominator is not 365 days")
 
     inputs = load_inputs(root)
     parameters = load_parameters(root)
@@ -194,7 +194,7 @@ def main():
         "E1_distribution_invariants": all(signal_audit[method]["same_sorted_distribution_as_dynamic"] for method in NEW_METHODS),
     }
     summary = {
-        "status": "Phase2E_E1_matched_signal_replacements",
+        "status": "matched_signal_replacements",
         "hours": 8760,
         "methods": METHODS,
         "equal_compute_methods": ("DYNAMIC", "SHIFT_7D", "PERMUTED_DAYS"),

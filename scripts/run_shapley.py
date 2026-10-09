@@ -136,7 +136,7 @@ def main():
         raise RuntimeError("F4 Shapley gate is not open")
     smoke = json.loads((root / "artifacts" / "experiment" / "shapley_smoke_2026-08-02" / "smoke_summary.json").read_text(encoding="utf-8"))
     if smoke["contract_sha256"] != contract_hash or not smoke["gates"]["C0_all_coalitions_feasible"] or not smoke["gates"]["C1_F4_identity"]:
-        raise RuntimeError("Phase 2C C0/C1 gate is not open")
+        raise RuntimeError("coalition smoke gate is not open")
     source_records = json.loads((root / "artifacts" / "experiment" / "main_2026-08-02" / "solver_records.json").read_text(encoding="utf-8"))
     full_reference_costs = [_reference_cost_from_f5_cap(record["planned_cost_cap"]) for record in source_records]
     inputs = load_inputs(root)
@@ -246,7 +246,7 @@ def main():
     with (output / "solver_records.json").open("w", encoding="utf-8") as handle:
         json.dump(solver_records, handle, ensure_ascii=False)
     summary = {
-        "status": "Phase2C_relative_budget_exact_Shapley",
+        "status": "relative_budget_exact_shapley",
         "hours": 8760,
         "practical_policy": "F4",
         "coalitions": COALITIONS,

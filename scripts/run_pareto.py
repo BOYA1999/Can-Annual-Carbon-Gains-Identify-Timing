@@ -149,7 +149,7 @@ def main():
     with (output / "solver_records.json").open("w", encoding="utf-8") as handle:
         json.dump(solver_records, handle, ensure_ascii=False)
     summary = {
-        "status": "Phase2B_annual_Pareto_frontier",
+        "status": "annual_pareto_frontier",
         "hours": 8760,
         "policies": list(POLICIES),
         "attached_read_only": {"F0": "main_2026-08-02/B1_dispatch.csv", "F5": "main_2026-08-02/P1_dispatch.csv"},

@@ -7,7 +7,7 @@ import pandas as pd
 from scipy.optimize import Bounds, LinearConstraint, milp
 from scipy.sparse import coo_matrix
 
-from src.model import HvacEnvelope, converter_tangents, line_loss_tangents
+from src.model import HvacEnvelope, converter_loss_exact, converter_tangents, line_loss_exact, line_loss_tangents
 
 
 class _Builder:
@@ -56,7 +56,23 @@ class DispatchResult:
     solver: dict
 
 
-def _loss_constraints(builder, power, loss, rating, active, loss_aware, line=False, efficiency_shift=0.0):
+class DispatchError(RuntimeError):
+    def __init__(self, solver: dict):
+        self.solver = solver
+        super().__init__(f"dispatch failed: {solver['message']}")
+
+
+def _loss_constraints(
+    builder,
+    power,
+    loss,
+    rating,
+    active,
+    loss_aware,
+    line=False,
+    efficiency_shift=0.0,
+    fractions=None,
+):
     for t in range(len(power)):
         if not loss_aware:
             builder.constraint([(loss[t], 1)], lower=0, upper=0)
@@ -65,7 +81,11 @@ def _loss_constraints(builder, power, loss, rating, active, loss_aware, line=Fal
             continue
         if active is not None:
             builder.constraint([(power[t], 1), (active[t], -rating)], upper=0)
-        lines = line_loss_tangents(rating) if line else converter_tangents(rating, efficiency_shift)
+        lines = (
+            line_loss_tangents(rating, fractions=fractions or (0.1, 0.4, 0.7, 1.0))
+            if line
+            else converter_tangents(rating, efficiency_shift, fractions or (0.1, 0.5, 1.0))
+        )
         for slope, intercept in lines:
             terms = [(loss[t], 1), (power[t], -slope)]
             if active is None:
@@ -91,12 +111,17 @@ def solve_day(
     hvac_energy_target_kwh: float = 0.0,
     hvac_flexible: bool = True,
     bess_flexible: bool = True,
+    throughput_cost_usd_per_kwh: float = 0.0,
+    solver_time_limit_seconds: float = 60.0,
+    relax_integrality: bool = False,
 ) -> DispatchResult:
     hours = len(day)
-    if hours != 24:
-        raise ValueError("solve_day requires 24 hours")
+    if hours < 1:
+        raise ValueError("dispatch horizon must contain at least one hour")
     ratings = parameters["network"]["ratings_kw"]
     efficiency_shift = parameters["network"].get("converter_efficiency_shift_fraction", 0.0)
+    converter_fractions = tuple(parameters["network"].get("converter_tangent_fractions", (0.1, 0.5, 1.0)))
+    line_fractions = tuple(parameters["network"].get("line_tangent_fractions", (0.1, 0.4, 0.7, 1.0)))
     bess = parameters["bess"]
     terminal_step = hours if terminal_step is None else terminal_step
     hvac_energy_steps = hours if hvac_energy_steps is None else hvac_energy_steps
@@ -131,14 +156,14 @@ def solve_day(
     temp_lb[terminal_step] = temp_ub[terminal_step] = 0
     temp = builder.variables("temperature_deviation_c", hours + 1, lower=temp_lb, upper=temp_ub)
 
-    _loss_constraints(builder, p_gi, losses[loss_names[0]], ratings["pcc"], z_gi, loss_aware, efficiency_shift=efficiency_shift)
-    _loss_constraints(builder, p_ge, losses[loss_names[1]], ratings["pcc"], z_ge, loss_aware, efficiency_shift=efficiency_shift)
-    _loss_constraints(builder, p_pv, losses[loss_names[2]], ratings["pv"], z_pv, loss_aware, efficiency_shift=efficiency_shift)
-    _loss_constraints(builder, p_bd, losses[loss_names[3]], ratings["bess"], z_bd, loss_aware, efficiency_shift=efficiency_shift)
-    _loss_constraints(builder, p_bc, losses[loss_names[4]], ratings["bess"], z_bc, loss_aware, efficiency_shift=efficiency_shift)
-    _loss_constraints(builder, p_main, losses[loss_names[5]], ratings["main"], None, loss_aware, efficiency_shift=efficiency_shift)
-    _loss_constraints(builder, p_hvac, losses[loss_names[6]], ratings["hvac_line"], None, loss_aware, line=True)
-    _loss_constraints(builder, p_fixed, losses[loss_names[7]], ratings["fixed_converter"], None, loss_aware, efficiency_shift=efficiency_shift)
+    _loss_constraints(builder, p_gi, losses[loss_names[0]], ratings["pcc"], z_gi, loss_aware, efficiency_shift=efficiency_shift, fractions=converter_fractions)
+    _loss_constraints(builder, p_ge, losses[loss_names[1]], ratings["pcc"], z_ge, loss_aware, efficiency_shift=efficiency_shift, fractions=converter_fractions)
+    _loss_constraints(builder, p_pv, losses[loss_names[2]], ratings["pv"], z_pv, loss_aware, efficiency_shift=efficiency_shift, fractions=converter_fractions)
+    _loss_constraints(builder, p_bd, losses[loss_names[3]], ratings["bess"], z_bd, loss_aware, efficiency_shift=efficiency_shift, fractions=converter_fractions)
+    _loss_constraints(builder, p_bc, losses[loss_names[4]], ratings["bess"], z_bc, loss_aware, efficiency_shift=efficiency_shift, fractions=converter_fractions)
+    _loss_constraints(builder, p_main, losses[loss_names[5]], ratings["main"], None, loss_aware, efficiency_shift=efficiency_shift, fractions=converter_fractions)
+    _loss_constraints(builder, p_hvac, losses[loss_names[6]], ratings["hvac_line"], None, loss_aware, line=True, fractions=line_fractions)
+    _loss_constraints(builder, p_fixed, losses[loss_names[7]], ratings["fixed_converter"], None, loss_aware, efficiency_shift=efficiency_shift, fractions=converter_fractions)
 
     for t in range(hours):
         builder.constraint([(z_gi[t], 1), (z_ge[t], 1)], upper=1)
@@ -210,6 +235,9 @@ def solve_day(
         lossless_carbon_vector[p_pv[t]] -= carbon[t]
         lossless_carbon_vector[p_bd[t]] -= carbon[t]
         lossless_carbon_vector[p_bc[t]] += carbon[t]
+        cost_vector[p_bd[t]] += 0.5 * throughput_cost_usd_per_kwh
+        cost_vector[p_bc[t]] += 0.5 * throughput_cost_usd_per_kwh
+        cost_vector[losses[loss_names[4]][t]] -= 0.5 * throughput_cost_usd_per_kwh
     if cost_cap_usd is not None:
         builder.constraint([(i, value) for i, value in enumerate(cost_vector) if value], upper=cost_cap_usd)
     target = {"cost": cost_vector, "emissions": carbon_vector, "emissions_lossless": lossless_carbon_vector}[objective]
@@ -217,13 +245,21 @@ def solve_day(
     matrix = builder.matrix()
     result = milp(
         target,
-        integrality=np.asarray(builder.integrality),
+        integrality=np.zeros(len(builder.integrality), dtype=int) if relax_integrality else np.asarray(builder.integrality),
         bounds=Bounds(np.asarray(builder.lb), np.asarray(builder.ub)),
         constraints=LinearConstraint(matrix, np.asarray(builder.row_lb), np.asarray(builder.row_ub)),
-        options={"time_limit": 60, "mip_rel_gap": 1e-8},
+        options={"time_limit": solver_time_limit_seconds, "mip_rel_gap": 1e-8},
     )
+    mip_gap = getattr(result, "mip_gap", None)
+    mip_node_count = getattr(result, "mip_node_count", None)
+    solver = {
+        "status": int(result.status),
+        "message": result.message,
+        "mip_gap": None if mip_gap is None else float(mip_gap),
+        "mip_node_count": None if mip_node_count is None else int(mip_node_count),
+    }
     if not result.success:
-        raise RuntimeError(f"dispatch failed: {result.message}")
+        raise DispatchError(solver)
     x = result.x
     output = day[["timestamp", "carbon_kg_per_kwh", "cost_usd_per_kwh", "pv_dc_kw"]].reset_index(drop=True).copy()
     for name, index in builder.names.items():
@@ -237,9 +273,11 @@ def solve_day(
     output["fixed_load_kw"] = envelope.fixed_kw
     output["hvac_load_kw"] = envelope.baseline_kw + output["hvac_adjustment_kw"]
     output["grid_export_delivered_kw"] = output["grid_export_bus_kw"] - output["grid_export_loss_kw"]
-    cost_value = float(output["cost_usd_per_kwh"].dot(output["grid_import_kw"] - output["grid_export_delivered_kw"]))
+    output["throughput_cost_usd"] = 0.5 * throughput_cost_usd_per_kwh * (
+        output["battery_discharge_kw"] + output["battery_charge_bus_kw"] - output["battery_charge_loss_kw"]
+    )
+    cost_value = float(output["cost_usd_per_kwh"].dot(output["grid_import_kw"] - output["grid_export_delivered_kw"]) + output["throughput_cost_usd"].sum())
     emissions = float(output["carbon_kg_per_kwh"].dot(output["grid_import_kw"] - output["grid_export_delivered_kw"]))
-    solver = {"status": int(result.status), "message": result.message, "mip_gap": float(getattr(result, "mip_gap", np.nan)), "mip_node_count": int(getattr(result, "mip_node_count", 0))}
     return DispatchResult(output, float(result.fun), cost_value, emissions, solver)
 
 
@@ -248,22 +286,42 @@ def load_parameters(root: Path) -> dict:
         return json.load(handle)
 
 
-def _loss_value(power: float, rating: float, line: bool = False, efficiency_shift: float = 0.0) -> float:
+def _loss_value(
+    power: float,
+    rating: float,
+    line: bool = False,
+    efficiency_shift: float = 0.0,
+    exact: bool = False,
+    fractions=None,
+) -> float:
     if power <= 0:
         return 0.0
-    lines = line_loss_tangents(rating) if line else converter_tangents(rating, efficiency_shift)
+    if exact:
+        return line_loss_exact(power) if line else converter_loss_exact(power, rating, efficiency_shift)
+    lines = (
+        line_loss_tangents(rating, fractions=fractions or (0.1, 0.4, 0.7, 1.0))
+        if line
+        else converter_tangents(rating, efficiency_shift, fractions or (0.1, 0.5, 1.0))
+    )
     return max(0.0, max(slope * power + intercept for slope, intercept in lines))
 
 
-def _input_for_output(output: float, rating: float, line: bool = False, efficiency_shift: float = 0.0) -> float:
+def _input_for_output(
+    output: float,
+    rating: float,
+    line: bool = False,
+    efficiency_shift: float = 0.0,
+    exact: bool = False,
+    fractions=None,
+) -> float:
     if output <= 0:
         return 0.0
     low, high = output, rating
-    if high - _loss_value(high, rating, line, efficiency_shift) < output:
+    if high - _loss_value(high, rating, line, efficiency_shift, exact, fractions) < output:
         raise ValueError("required converter output exceeds rating")
     for _ in range(60):
         middle = 0.5 * (low + high)
-        if middle - _loss_value(middle, rating, line, efficiency_shift) < output:
+        if middle - _loss_value(middle, rating, line, efficiency_shift, exact, fractions) < output:
             low = middle
         else:
             high = middle
@@ -277,9 +335,16 @@ def replay_day(
     controls: dict[str, np.ndarray],
     initial_soc_kwh: float | None = None,
     initial_temp_deviation_c: float = 0.0,
+    loss_model: str = "tangent",
+    throughput_cost_usd_per_kwh: float = 0.0,
 ) -> pd.DataFrame:
     ratings = parameters["network"]["ratings_kw"]
     efficiency_shift = parameters["network"].get("converter_efficiency_shift_fraction", 0.0)
+    exact = loss_model == "exact"
+    if loss_model not in ("tangent", "exact"):
+        raise ValueError("loss_model must be 'tangent' or 'exact'")
+    converter_fractions = tuple(parameters["network"].get("converter_tangent_fractions", (0.1, 0.5, 1.0)))
+    line_fractions = tuple(parameters["network"].get("line_tangent_fractions", (0.1, 0.4, 0.7, 1.0)))
     bess = parameters["bess"]
     hours = len(day)
     u = np.asarray(controls["hvac_adjustment_kw"], dtype=float)
@@ -299,36 +364,36 @@ def replay_day(
     state = initial_temp_deviation_c
     for t in range(hours):
         hvac_load = envelope.baseline_kw[t] + u[t]
-        p_hvac = _input_for_output(hvac_load, ratings["hvac_line"], line=True)
-        l_hvac = _loss_value(p_hvac, ratings["hvac_line"], line=True)
-        p_fixed = _input_for_output(envelope.fixed_kw[t], ratings["fixed_converter"], efficiency_shift=efficiency_shift)
-        l_fixed = _loss_value(p_fixed, ratings["fixed_converter"], efficiency_shift=efficiency_shift)
-        p_main = _input_for_output(p_hvac + p_fixed, ratings["main"], efficiency_shift=efficiency_shift)
-        l_main = _loss_value(p_main, ratings["main"], efficiency_shift=efficiency_shift)
-        max_stored_charge = ratings["bess"] - _loss_value(ratings["bess"], ratings["bess"], efficiency_shift=efficiency_shift)
+        p_hvac = _input_for_output(hvac_load, ratings["hvac_line"], line=True, exact=exact, fractions=line_fractions)
+        l_hvac = _loss_value(p_hvac, ratings["hvac_line"], line=True, exact=exact, fractions=line_fractions)
+        p_fixed = _input_for_output(envelope.fixed_kw[t], ratings["fixed_converter"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
+        l_fixed = _loss_value(p_fixed, ratings["fixed_converter"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
+        p_main = _input_for_output(p_hvac + p_fixed, ratings["main"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
+        l_main = _loss_value(p_main, ratings["main"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
+        max_stored_charge = ratings["bess"] - _loss_value(ratings["bess"], ratings["bess"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
         if stored_charge[t] > max_stored_charge:
             if stored_charge[t] - max_stored_charge > 1e-6:
                 raise ValueError("planned stored charge exceeds physical tolerance")
             stored_charge[t] = max_stored_charge
-        p_bc = _input_for_output(stored_charge[t], ratings["bess"], efficiency_shift=efficiency_shift)
-        l_bc = _loss_value(p_bc, ratings["bess"], efficiency_shift=efficiency_shift)
+        p_bc = _input_for_output(stored_charge[t], ratings["bess"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
+        l_bc = _loss_value(p_bc, ratings["bess"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
         p_bd = battery_discharge[t]
-        l_bd = _loss_value(p_bd, ratings["bess"], efficiency_shift=efficiency_shift)
+        l_bd = _loss_value(p_bd, ratings["bess"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
         pv_available = min(float(day["pv_dc_kw"].iloc[t]), ratings["pv"])
-        l_pv_available = _loss_value(pv_available, ratings["pv"], efficiency_shift=efficiency_shift)
+        l_pv_available = _loss_value(pv_available, ratings["pv"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
         pv_delivered_available = max(0.0, pv_available - l_pv_available)
         n3_demand = p_main + p_bc - (p_bd - l_bd)
         if pv_delivered_available <= n3_demand:
             p_pv = pv_available if pv_delivered_available > 0 else 0.0
             l_pv = l_pv_available if p_pv else 0.0
-            p_gi = _input_for_output(n3_demand - pv_delivered_available, ratings["pcc"], efficiency_shift=efficiency_shift)
-            l_gi = _loss_value(p_gi, ratings["pcc"], efficiency_shift=efficiency_shift)
+            p_gi = _input_for_output(n3_demand - pv_delivered_available, ratings["pcc"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
+            l_gi = _loss_value(p_gi, ratings["pcc"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions)
             p_ge = l_ge = 0.0
         else:
             p_pv = pv_available
             l_pv = l_pv_available
             p_ge = pv_delivered_available - n3_demand
-            l_ge = min(p_ge, _loss_value(p_ge, ratings["pcc"], efficiency_shift=efficiency_shift))
+            l_ge = min(p_ge, _loss_value(p_ge, ratings["pcc"], efficiency_shift=efficiency_shift, exact=exact, fractions=converter_fractions))
             p_gi = l_gi = 0.0
         values = (p_gi, p_ge, p_pv, p_bd, p_bc, p_main, p_hvac, p_fixed, l_gi, l_ge, l_pv, l_bd, l_bc, l_main, l_hvac, l_fixed)
         for name, value in zip(records, values):
@@ -355,4 +420,7 @@ def replay_day(
     output["fixed_load_kw"] = envelope.fixed_kw
     output["hvac_load_kw"] = envelope.baseline_kw + u
     output["grid_export_delivered_kw"] = output["grid_export_bus_kw"] - output["grid_export_loss_kw"]
+    output["throughput_cost_usd"] = 0.5 * throughput_cost_usd_per_kwh * (
+        output["battery_discharge_kw"] + output["battery_charge_bus_kw"] - output["battery_charge_loss_kw"]
+    )
     return output

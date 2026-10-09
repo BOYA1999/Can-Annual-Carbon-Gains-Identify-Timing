@@ -55,25 +55,53 @@ def build_hvac_envelope(frame: pd.DataFrame, tau_hours: float = 8.0, comfort_del
     )
 
 
-def converter_tangents(rating_kw: float, efficiency_shift: float = 0.0) -> list[tuple[float, float]]:
+def converter_loss_coefficients(efficiency_shift: float = 0.0) -> tuple[float, float, float]:
     if efficiency_shift == 0:
         fixed, linear, quadratic = 0.0033333333333333335, 0.01, 0.016666666666666666
     else:
         fractions = np.array([0.1, 0.5, 1.0])
         efficiency = np.clip(np.array([0.955, 0.975, 0.97]) + efficiency_shift, 1e-6, 1 - 1e-6)
         quadratic, linear, fixed = np.polyfit(fractions, fractions * (1 - efficiency), 2)
+    return float(fixed), float(linear), float(quadratic)
+
+
+def converter_loss_exact(power_kw: float, rating_kw: float, efficiency_shift: float = 0.0) -> float:
+    if power_kw <= 0:
+        return 0.0
+    fixed, linear, quadratic = converter_loss_coefficients(efficiency_shift)
+    fraction = power_kw / rating_kw
+    return rating_kw * (fixed + linear * fraction + quadratic * fraction * fraction)
+
+
+def converter_tangents(
+    rating_kw: float,
+    efficiency_shift: float = 0.0,
+    fractions: tuple[float, ...] = (0.1, 0.5, 1.0),
+) -> list[tuple[float, float]]:
+    fixed, linear, quadratic = converter_loss_coefficients(efficiency_shift)
     lines = []
-    for fraction in (0.1, 0.5, 1.0):
+    for fraction in fractions:
         slope = linear + 2.0 * quadratic * fraction
         intercept = rating_kw * (fixed - quadratic * fraction * fraction)
         lines.append((slope, intercept))
     return lines
 
 
-def line_loss_tangents(rating_kw: float, resistance_ohm: float = 0.001, voltage_v: float = 380.0) -> list[tuple[float, float]]:
+def line_loss_exact(power_kw: float, resistance_ohm: float = 0.001, voltage_v: float = 380.0) -> float:
+    if power_kw <= 0:
+        return 0.0
+    return 1000.0 * resistance_ohm * power_kw**2 / voltage_v**2
+
+
+def line_loss_tangents(
+    rating_kw: float,
+    resistance_ohm: float = 0.001,
+    voltage_v: float = 380.0,
+    fractions: tuple[float, ...] = (0.1, 0.4, 0.7, 1.0),
+) -> list[tuple[float, float]]:
     coefficient = 1000.0 * resistance_ohm / voltage_v**2
     lines = []
-    for fraction in (0.1, 0.4, 0.7, 1.0):
+    for fraction in fractions:
         point = fraction * rating_kw
         lines.append((2.0 * coefficient * point, -coefficient * point**2))
     return lines

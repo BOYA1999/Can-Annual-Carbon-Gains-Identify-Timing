@@ -18,3 +18,6 @@ def test_units_and_capacity_contract():
     assert data.frame["cost_usd_per_kwh"].max() < 3.0
     assert abs(data.metadata["pv_dc_energy_fraction"] - 0.60) < 1e-12
     assert data.metadata["bess_energy_kwh"] > 0
+    assert not data.metadata["load_grid_same_source_year"]
+    assert data.metadata["load_grid_calendar_positions_equal"]
+    assert "tmy-2020" in data.metadata["pv_weather_data_source"].lower()

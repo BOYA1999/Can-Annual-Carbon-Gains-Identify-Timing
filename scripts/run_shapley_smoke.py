@@ -113,7 +113,7 @@ def main():
     }
     (output / "solver_records.json").write_text(json.dumps(solver_records, ensure_ascii=False), encoding="utf-8")
     summary = {
-        "status": "Phase2C_C0_C1_smoke",
+        "status": "coalition_smoke_test",
         "days": {"C0": [0, 182, 364], "C1_P0_window": list(range(190, 197))},
         "gates": gates,
         "passed": all(gates.values()),
@@ -135,7 +135,7 @@ def main():
     (output / "smoke_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"gates": gates, "passed": summary["passed"], "F4_sha256": summary["F4_sha256"]}, ensure_ascii=False, indent=2))
     if not summary["passed"]:
-        raise RuntimeError("Phase 2C C0/C1 gate failed")
+        raise RuntimeError("coalition smoke gate failed")
 
 
 if __name__ == "__main__":

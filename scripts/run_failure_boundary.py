@@ -67,7 +67,7 @@ def main():
     source_root = root / "artifacts" / "experiment" / "sensitivity_2026-08-02"
     source = json.loads((source_root / "sensitivity_summary.json").read_text(encoding="utf-8"))
     if not source["passed"]:
-        raise RuntimeError("verified Phase 2D source did not pass")
+        raise RuntimeError("verified sensitivity source did not pass")
 
     inputs = load_inputs(root)
     parameters = load_parameters(root)
@@ -211,7 +211,7 @@ def main():
         "E3_successful_solvers_optimal": all(value["status"] == 0 for value in solver_leaves),
     }
     summary = {
-        "status": "Phase2E_E3_forecast_feasibility_boundary",
+        "status": "forecast_feasibility_boundary",
         "hours_per_scenario": 672,
         "new_levels": LEVELS,
         "seeds": SEEDS,

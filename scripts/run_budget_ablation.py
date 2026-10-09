@@ -131,12 +131,12 @@ def _run_allowance(root, allowance, contract_hash, parameter_hash):
     solver_records = [{"day": item["day"], "caps": item["caps"], "solver": item["solver"]} for item in completed]
     (output / "solver_records.json").write_text(json.dumps(solver_records, ensure_ascii=False), encoding="utf-8")
     summary = {
-        "status": "Phase2E_E2_complete_coalition_budget_ablation",
+        "status": "complete_coalition_budget_ablation",
         "allowance": allowance,
         "hours": 8760,
         "coalitions": COALITIONS,
         "features": source_summary["features"],
-        "economic_references": "attached from verified Phase 2C daily resource-set minima",
+        "economic_references": "attached from verified daily resource-set minima",
         "metrics": metrics,
         "attribution": attribution,
         "integrity": integrity,
@@ -192,7 +192,7 @@ def _summarize(root, contract_hash, parameter_hash):
         for feature in ("A", "B", "C")
     }
     combined = {
-        "status": "Phase2E_E2_budget_sensitivity_curve",
+        "status": "budget_sensitivity_curve",
         "allowances": sorted(summaries),
         "dominant_feature": dominant,
         "same_dominant_feature_across_allowances": len(set(dominant.values())) == 1,

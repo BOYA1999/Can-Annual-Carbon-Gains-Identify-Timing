@@ -33,6 +33,10 @@ def test_one_day_cost_dispatch_is_feasible_and_closed():
     replay_metrics = evaluate_dispatch(replay)
     assert replay_metrics["energy_closure_relative_error"] < 1e-8
     assert replay_metrics["carbon_closure_relative_error"] < 1e-8
+    exact_replay = replay_day(day, envelope, parameters, controls, loss_model="exact")
+    exact_metrics = evaluate_dispatch(exact_replay)
+    assert exact_metrics["energy_closure_relative_error"] < 1e-8
+    assert exact_metrics["carbon_closure_relative_error"] < 1e-8
 
 
 def test_nondefault_initial_states_are_propagated():

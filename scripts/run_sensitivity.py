@@ -287,7 +287,7 @@ def main():
         if value["emissions_fraction"] >= 0
     ]
     summary = {
-        "status": "Phase2D_bounded_seasonal_OFAT",
+        "status": "bounded_seasonal_ofat",
         "hours_per_scenario": 672,
         "scenarios": SCENARIOS,
         "methods": METHODS,
@@ -321,7 +321,7 @@ def main():
     (output / "sensitivity_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"direction_counts": summary["direction_counts"], "emissions_rank_reversals": reversals, "gates": gates, "passed": summary["passed"]}, ensure_ascii=False, indent=2))
     if not summary["passed"]:
-        raise RuntimeError("Phase 2D evidence-recording gate failed")
+        raise RuntimeError("sensitivity recording gate failed")
 
 
 if __name__ == "__main__":

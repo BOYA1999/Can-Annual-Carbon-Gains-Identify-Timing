@@ -23,6 +23,10 @@ def _read_8760(path: Path, value_column: str, time_column: str) -> tuple[pd.Data
     return data, time
 
 
+def _calendar_signature(time: pd.Series) -> np.ndarray:
+    return np.column_stack((time.dt.month, time.dt.day, time.dt.hour))
+
+
 def load_inputs(root: Path) -> InputData:
     raw = root / "data" / "raw"
     source = root / "data" / "extracted" / "california" / "California"
@@ -33,6 +37,10 @@ def load_inputs(root: Path) -> InputData:
     cost, cost_time = _read_8760(source / "cambium_grid_data_California_cambium_grid_value.csv", "value", "timestamp")
     if not timestamp.equals(hvac_time) or not timestamp.equals(precool_time):
         raise ValueError("load scenarios are not time aligned")
+    if not carbon_time.equals(cost_time):
+        raise ValueError("grid carbon and cost series are not time aligned")
+    if not np.array_equal(_calendar_signature(timestamp), _calendar_signature(carbon_time)):
+        raise ValueError("load and grid series do not share hour-of-year calendar positions")
     if not np.all(np.diff(timestamp.values).astype("timedelta64[h]") == np.timedelta64(1, "h")):
         raise ValueError("load timeline is not hourly")
     with (raw / "pvwatts_pasadena_1kw.json").open(encoding="utf-8") as handle:
@@ -68,7 +76,9 @@ def load_inputs(root: Path) -> InputData:
         "pvwatts_request_url": "https://developer.nlr.gov/api/pvwatts/v8.json",
         "load_year": int(timestamp.dt.year.iloc[0]),
         "grid_source_year": int(carbon_time.dt.year.iloc[0]),
-        "grid_alignment": "positional standard-year alignment documented by Dataset 205 methodology",
+        "grid_alignment": "benchmark-consistent month-day-hour positional alignment; source years are not contemporaneous",
+        "load_grid_same_source_year": bool(timestamp.dt.year.iloc[0] == carbon_time.dt.year.iloc[0]),
+        "load_grid_calendar_positions_equal": True,
         "carbon_source": "15-year normalized long-run marginal CO2 rate",
         "carbon_raw_unit": "kg_CO2_per_MWh",
         "cost_source": "combined short-run marginal grid value",
@@ -76,6 +86,8 @@ def load_inputs(root: Path) -> InputData:
         "pvwatts_version": pv["version"],
         "pvwatts_request": pv["inputs"],
         "pv_station": pv["station_info"],
+        "pv_weather_data_source": pv["station_info"]["weather_data_source"],
+        "pv_alignment": "PVWatts typical-year values aligned by hour-of-year position; not contemporaneous with load or grid data",
         "pv_capacity_kw": pv_capacity_kw,
         "pv_dc_energy_fraction": float(frame["pv_dc_kw"].sum() / frame["load_baseline_kw"].sum()),
         "bess_energy_kwh": 2.0 * peak_net_kw,
@@ -106,6 +118,8 @@ def audit_inputs(root: Path) -> dict:
         "carbon_nonnegative": bool((frame["carbon_kg_per_kwh"] >= 0).all()),
         "cost_nonnegative": bool((frame["cost_usd_per_kwh"] >= 0).all()),
         "license_captured": (raw / "dataset205_license.html").exists(),
+        "cross_year_alignment_disclosed": not inputs.metadata["load_grid_same_source_year"],
+        "calendar_positions_equal": inputs.metadata["load_grid_calendar_positions_equal"],
     }
     return {
         "gate": "G0",
